@@ -18,6 +18,11 @@ Wire 协议(来自 MaaTouch InputThread):
   t <text>                    文本输入
 注意:pressure 在设备端按整数除以 255,必须传 255 才算真实按下。
 坐标为显示像素(header 的 ^ 行给出 max_x/max_y = 显示分辨率)。
+
+坑(来自 StarRailCopilot 经验):MaaTouch 在**启动时缓存屏幕方向**,握手返回的 max_x/max_y
+对应当时的方向。若设备发生横竖屏旋转,坐标系会错位,需要重启 MaaTouch 进程(调用
+reinit())。皇室战争对战恒为竖屏,通常无此问题,但退到桌面/其它方向界面时要留意。
+另:长时间运行管道可能断开,_write() 会自动重连一次自愈。
 """
 
 from __future__ import annotations
@@ -82,6 +87,9 @@ class MaaTouchController:
                         err = self._proc.stderr.read().decode(errors="replace")
                     raise RuntimeError(f"MaaTouch 进程退出。stderr:\n{err[-500:]}")
                 continue
+            if line == "Aborted":
+                # MaaTouch 未正确安装(二进制缺失/损坏)时的典型输出
+                raise RuntimeError("MaaTouch 返回 Aborted:二进制可能未正确 push 到设备")
             if line.startswith("^"):
                 parts = line.split()
                 # ^ max_contacts max_x max_y max_pressure
@@ -95,13 +103,33 @@ class MaaTouchController:
                 return
         raise RuntimeError("MaaTouch 未在 5 秒内返回握手头")
 
+    def _reconnect(self) -> None:
+        """重建 MaaTouch 进程(长时间运行中管道断开 / adb 重连后自愈)。"""
+        logger.warning("MaaTouch 管道断开,重连中…")
+        try:
+            if self._proc:
+                self._proc.terminate()
+        except Exception:
+            pass
+        self._proc = None
+        self.open()
+
     # —— 底层写入 ——
     def _write(self, *lines: str) -> None:
-        assert self._proc and self._proc.stdin
         payload = ("".join(f"{ln}\n" for ln in lines)).encode()
-        with self._lock:
-            self._proc.stdin.write(payload)
-            self._proc.stdin.flush()
+        for attempt in (1, 2):
+            if self._proc is None or self._proc.stdin is None:
+                self._reconnect()
+            try:
+                with self._lock:
+                    self._proc.stdin.write(payload)  # type: ignore[union-attr]
+                    self._proc.stdin.flush()          # type: ignore[union-attr]
+                return
+            except (BrokenPipeError, OSError) as e:
+                if attempt == 2:
+                    raise
+                logger.warning(f"MaaTouch 写入失败({e}),尝试重连")
+                self._reconnect()
 
     def _clamp(self, x: int, y: int) -> tuple[int, int]:
         cx = min(max(int(x), 0), self.max_x - 1) if self.max_x else int(x)
@@ -153,6 +181,10 @@ class MaaTouchController:
 
     def reset(self) -> None:
         self._write("r")
+
+    def reinit(self) -> None:
+        """重启 MaaTouch(屏幕方向变化后必须调用,以刷新缓存的坐标系)。"""
+        self._reconnect()
 
     def close(self) -> None:
         if self._proc:
