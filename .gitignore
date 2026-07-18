@@ -1,1 +1,41 @@
+# ── Python ──────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# ── 虚拟环境 / uv ────────────────────────────────────────
+.venv/
+venv/
+
+# ── 项目产物（体积大 / 不入库）─────────────────────────────
 tmp/
+# 训练权重、导出的 CoreML/ONNX 模型
+models/*.pt
+models/*.onnx
+models/*.mlpackage/
+models/*.mlmodel
+# 采集到的原始截图 / 录屏 / 数据集
+data/raw/
+data/frames/
+data/datasets/
+data/captures/
+*.mp4
+*.mkv
+# 运行期抓取的单帧
+captures/
+
+# adb push 到设备用的原生二进制
+bin/maatouch
+bin/minitouch*
+
+# ── 系统 / 编辑器 ────────────────────────────────────────
+.DS_Store
+.idea/
+.vscode/
+*.log

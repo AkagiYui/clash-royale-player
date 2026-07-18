@@ -1,0 +1,60 @@
+[project]
+name = "clash-royale-player"
+version = "0.1.0"
+description = "感知与决策解耦的皇室战争自动游玩 AI —— 感知层（战场信息识别）"
+readme = "README.md"
+requires-python = ">=3.11,<3.13"
+license = { text = "MIT" }
+authors = [{ name = "AkagiYui" }]
+
+dependencies = [
+    # 核心图像 / 数值
+    "numpy>=1.26,<2.2",
+    "opencv-python>=4.9",
+    "pillow>=10.2",
+    "pyyaml>=6.0",
+    # 采集 & 设备控制
+    "adbutils>=2.5",
+    # UI 层级状态(检测游戏退出/弹窗)
+    "uiautomator2>=3.2",
+    # 感知层：目标检测（YOLO，自动拉入 torch/torchvision）
+    "ultralytics>=8.3",
+    # CLI / 日志
+    "typer>=0.12",
+    "loguru>=0.7",
+]
+
+[project.optional-dependencies]
+# OCR（计时器/比分）。tesseract 未安装时用 easyocr 作为可插拔后端。
+ocr = ["easyocr>=1.7"]
+# 开发
+dev = ["pytest>=8.0", "ruff>=0.6"]
+
+# 系统依赖(非 pip)：
+#   - adb        : 采集/推送二进制/uiautomator2 都需要
+#   - scrcpy     : 提供 scrcpy-server(brew install scrcpy)，scrcpy 采集后端用
+#   - ffmpeg     : scrcpy 采集后端解码 H264(brew install ffmpeg)
+# 注：不引入 PyPI 的 scrcpy-client(已停更且钉死旧版 adbutils/av，与本项目冲突)；
+# scrcpy 采集在 src/crplayer/capture/scrcpy.py 中用 scrcpy-server + ffmpeg CLI 自实现。
+# 不用 PyAV 是因为 cv2 与 PyAV 各自打包不同版本 libavcodec，同进程符号冲突会静默失败。
+
+[project.scripts]
+crplayer = "crplayer.cli:app"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/crplayer"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W", "UP", "B"]
+
+[tool.ruff.lint.per-file-ignores]
+# typer 的惯用法就是在参数默认值里调用 Option/Argument
+"src/crplayer/cli.py" = ["B008"]

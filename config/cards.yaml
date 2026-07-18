@@ -1,0 +1,17 @@
+# 卡牌静态数据(可插拔配置)。
+# 架构文档阶段三:卡牌数值不硬编码进权重,平衡性调整后热更新此文件即可。
+#
+# 建议后续用 RoyaleAPI/cr-api-data 同步生成,这里先放少量占位示例。
+# 字段:elixir(圣水费用)、type(troop/spell/building)、targets(air/ground)。
+
+cards:
+  knight:      { elixir: 3, type: troop,    name_cn: 骑士 }
+  archers:     { elixir: 3, type: troop,    name_cn: 弓箭手 }
+  goblins:     { elixir: 2, type: troop,    name_cn: 哥布林 }
+  giant:       { elixir: 5, type: troop,    name_cn: 巨人 }
+  minions:     { elixir: 3, type: troop,    name_cn: 亡灵 }
+  fireball:    { elixir: 4, type: spell,    name_cn: 火球 }
+  arrows:      { elixir: 3, type: spell,    name_cn: 弓箭 }
+  cannon:      { elixir: 3, type: building, name_cn: 加农炮 }
+  musketeer:   { elixir: 4, type: troop,    name_cn: 火枪手 }
+  hog_rider:   { elixir: 4, type: troop,    name_cn: 野猪骑士 }
