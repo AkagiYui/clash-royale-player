@@ -49,12 +49,48 @@ class MaaTouchController:
         self.max_x = 0
         self.max_y = 0
         self.max_contacts = 10
+        # 屏幕旋转(0/1/2/3 = 0/90/180/270)。MaaTouch 注入到自然方向的输入层,
+        # 若显示处于旋转态,需把逻辑坐标转换回自然方向坐标(见 _to_native)。
+        self.rotation = 0
 
     def _adb(self, *args: str) -> list[str]:
         base = ["adb"]
         if self.serial:
             base += ["-s", self.serial]
         return base + list(args)
+
+    def _query_rotation(self) -> int:
+        """读取当前显示旋转(0/1/2/3)。跨 OEM 尽量兼容。"""
+        try:
+            out = subprocess.check_output(
+                self._adb("shell", "dumpsys", "window", "displays"), text=True, timeout=5
+            )
+        except Exception:  # pragma: no cover
+            return 0
+        import re
+
+        m = re.search(r"mRotation=ROTATION_(\d+)", out) or re.search(r"mRotation=(\d)", out)
+        if not m:
+            return 0
+        val = int(m.group(1))
+        return {0: 0, 90: 1, 180: 2, 270: 3}.get(val, val if val in (0, 1, 2, 3) else 0)
+
+    def _to_native(self, x: int, y: int) -> tuple[int, int]:
+        """把逻辑显示坐标转换为 MaaTouch 注入所用的自然方向坐标。
+
+        本设备自然方向为竖屏(max_x x max_y)。屏幕旋转 180° 时,adb input 走逻辑坐标不受
+        影响,但 MaaTouch 直写输入层(自然方向),坐标会整体翻转,需在此校正。
+        """
+        r = self.rotation
+        if r == 0:
+            return x, y
+        if r == 2:  # 180° 上下颠倒
+            return self.max_x - x, self.max_y - y
+        # 90/270:竖屏游戏通常不会走到,做一次坐标轴交换的近似并告警
+        logger.warning(f"MaaTouch 遇到旋转 {r*90}°,坐标变换未充分验证")
+        if r == 1:  # 90
+            return y, self.max_y - x
+        return self.max_x - y, x  # 270
 
     def open(self) -> None:
         if not self.binary.exists():
@@ -73,6 +109,9 @@ class MaaTouchController:
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         )
         self._read_header()
+        self.rotation = self._query_rotation()
+        if self.rotation:
+            logger.info(f"当前屏幕旋转 {self.rotation * 90}°,MaaTouch 坐标将做方向校正")
 
     def _read_header(self) -> None:
         """解析 `^ <max_contacts> <max_x> <max_y> <max_pressure>` 与 `$ <pid>`。"""
@@ -131,28 +170,35 @@ class MaaTouchController:
                 logger.warning(f"MaaTouch 写入失败({e}),尝试重连")
                 self._reconnect()
 
-    def _clamp(self, x: int, y: int) -> tuple[int, int]:
+    def _prep(self, x: int, y: int) -> tuple[int, int]:
+        """输入逻辑显示坐标 -> 裁剪到屏内 -> 转换为注入用的自然方向坐标。"""
         cx = min(max(int(x), 0), self.max_x - 1) if self.max_x else int(x)
         cy = min(max(int(y), 0), self.max_y - 1) if self.max_y else int(y)
-        return cx, cy
+        return self._to_native(cx, cy)
 
-    # —— 设备像素坐标 API ——
-    def tap(self, x: int, y: int, hold_ms: int = 40, contact: int = 0) -> None:
-        """在设备像素 (x,y) 点击。"""
-        x, y = self._clamp(x, y)
-        self._write(f"d {contact} {x} {y} {_PRESSURE}", "c")
+    # —— 设备像素坐标 API(传入逻辑显示坐标,与截图坐标系一致)——
+    def tap(self, x: int, y: int, hold_ms: int = 0, contact: int = 0) -> None:
+        """在设备像素 (x,y) 点击(逻辑坐标,自动做旋转校正)。
+
+        关键:down/commit/up/commit 必须**一次性**写入同一 payload(参考 SRC)。
+        若在 down 与 up 之间用 Python sleep 分成两次写,触点会保持按下,下一次 down
+        变成拖拽,按钮永远收不到"点击"。hold 用设备端 `w` 事件实现,仍在同一 payload。
+        """
+        x, y = self._prep(x, y)
+        cmds = [f"d {contact} {x} {y} {_PRESSURE}", "c"]
         if hold_ms > 0:
-            time.sleep(hold_ms / 1000.0)
-        self._write(f"u {contact}", "c")
+            cmds.append(f"w {hold_ms}")
+        cmds += [f"u {contact}", "c"]
+        self._write(*cmds)
 
     def swipe(
         self,
         x1: int, y1: int, x2: int, y2: int,
         duration_ms: int = 300, steps: int = 16, contact: int = 0,
     ) -> None:
-        """从 (x1,y1) 拖到 (x2,y2)。用设备端 w 事件控制节奏。"""
-        x1, y1 = self._clamp(x1, y1)
-        x2, y2 = self._clamp(x2, y2)
+        """从 (x1,y1) 拖到 (x2,y2)(逻辑坐标)。用设备端 w 事件控制节奏。"""
+        x1, y1 = self._prep(x1, y1)
+        x2, y2 = self._prep(x2, y2)
         steps = max(steps, 1)
         step_ms = max(duration_ms // steps, 1)
         self._write(f"d {contact} {x1} {y1} {_PRESSURE}", "c")
