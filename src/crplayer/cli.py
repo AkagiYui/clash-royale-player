@@ -188,6 +188,23 @@ def uistate(
 
 
 @app.command()
+def scene(
+    serial: str = typer.Option(None, "--serial", help="设备 serial"),
+    backend: str = typer.Option("scrcpy", "--backend", help="采集后端"),
+    goto: str = typer.Option(None, "--goto", help="导航到目标场景(如 in_battle)"),
+) -> None:
+    """场景调度:识别当前场景(传统 CV),或用 --goto 沿导航图跳转。"""
+    from crplayer.scene import SceneController
+
+    with SceneController(serial=serial, backend=backend) as sc:
+        cur = sc.current_scene()
+        typer.echo(f"当前场景: {cur}")
+        if goto:
+            ok = sc.goto(goto)
+            typer.echo(f"导航到 {goto}: {'成功' if ok else '失败'}")
+
+
+@app.command()
 def tap(
     x: int = typer.Argument(..., help="设备像素 X"),
     y: int = typer.Argument(..., help="设备像素 Y"),
