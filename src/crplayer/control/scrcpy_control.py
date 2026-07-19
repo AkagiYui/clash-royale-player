@@ -104,7 +104,8 @@ class ScrcpyControl:
         assert self._sock is not None
         pressure = 0xFFFF if action != _ACTION_UP else 0
         buttons = 1 if action != _ACTION_UP else 0
-        # >B type, B action, Q pointer_id, i x, i y, H w, H h, H pressure, I action_button, I buttons
+        # 字段: type B, action B, pointer_id Q, x i, y i, w H, h H, pressure H,
+        #       action_button I, buttons I
         pkt = struct.pack(
             ">BBQiiHHHII", _TYPE_INJECT_TOUCH, action, _POINTER_ID,
             int(x), int(y), self.width, self.height, pressure, 0, buttons,
