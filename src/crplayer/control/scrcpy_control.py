@@ -4,11 +4,19 @@
 通过其控制 socket 发送 INJECT_TOUCH_EVENT 消息注入触控。这是有别于 MaaTouch
 (InputManager 反射) / adb input 的第三条注入路径。
 
-实测:
-- 国际服:可正常点击/开战。
-- 国服(腾讯 ACE):能注册为真实触点(pointer location 显示 P:1/1)并触发部分 UI,
-  但"对战/开始匹配"仍被拦(与 MaaTouch/adb input/evdev 结论一致——ACE 针对开战操作
-  在输入层之下鉴别,换注入方式无法绕过)。
+设计上的优点:scrcpy-server 注入前会用反射 `InputEvent.setDisplayId(displayId)` 把事件绑定
+到目标显示——这正是 MaaTouch 所缺失、导致其在本机不派发到游戏窗口的那一步(详见
+control/adb_input.py)。故理论上这条通道能派发到游戏窗口,且常驻 socket、支持多点、延迟低。
+
+⚠️ 本机(OPPO OPD2413 / Android 16)实测(2026-07,scrcpy 3.3.4,server 版本一致):
+**本模块当前实现注入无效**——发 INJECT_TOUCH 后,开发者"指针位置"叠层仍为 P:0/1、Prs:0.0,
+即触点**根本没注册进输入系统**(对比 MaaTouch 至少能到 P:1/1)。这说明是本模块的控制协议/
+握手实现与 scrcpy 3.x 对不上(而非 displayId 派发问题),用前需先调试。默认后端请用 adb。
+
+⚠️ 历史备注更正:早期注释曾断言"国服开战被输入层拦截、换注入方式都不行"。该结论已证伪,
+与反外挂无关——adb input 实测可正常点"对战"开战、可点结算/对话框;当时的"点不动"部分是
+**坐标量错**(把按钮下方约 245px 的背景当成按钮)。MaaTouch 不通的真正原因是注入事件缺
+displayId(见 adb_input.py 顶部),换到带 displayId 的 adb input 即可。
 
 坐标:传入逻辑显示坐标(与截图一致),消息里带上屏幕宽高,server 端负责映射。
 """

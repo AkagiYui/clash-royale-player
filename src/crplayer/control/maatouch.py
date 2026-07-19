@@ -1,5 +1,15 @@
 """MaaTouch 触控注入(常驻 socket,最贴近真实物理触控)。
 
+⚠️ 本机实测不可用(OPPO OPD2413 / Android 16),与设备/系统版本有关、别的设备没有:
+MaaTouch 注入的 MotionEvent 能被输入监视层看到(开发者"指针位置"叠层显示 P:1/1、坐标
+压力都对),但**不会派发到游戏窗口**——点按钮无反应。根因(已对照官方源码)是其
+Controller.java 构造事件时**从不调用 setDisplayId**、且用 INJECT_MODE_ASYNC 静默注入;
+Android 12+ 会丢弃无有效目标显示的注入事件(logcat "no touched window on display")。
+scrcpy 用 InputEvent.setDisplayId 解决了同类问题(其 issue #3186),MaaTouch 至今未跟进。
+MaaTouch 是编译好的 dex 无法从外部补 displayId,故改用 control/adb_input.py 的
+AdbInputController(默认后端)。此模块保留供其它设备使用。
+
+
 架构文档阶段零:MaaTouch 优于 adb input / scrcpy 控制通道——常驻进程免去 spawn 开销,
 多点触控原生支持。100% Java,通过 app_process 运行,不需按 CPU 架构匹配二进制。
 

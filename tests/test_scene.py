@@ -32,8 +32,8 @@ def test_template_self_match():
 
 def test_no_false_match_on_blank():
     """纯黑画面不应命中按钮。"""
-    tmpl = Template(name="main_battle_button", file="main_battle_button.png",
-                    area=(360, 955, 552, 1052))
+    tmpl = Template(name="main_battle_button", file="main_battle_button_bonus.png",
+                    area=(354, 958, 565, 1045))
     canvas = np.zeros((REF_HEIGHT, REF_WIDTH, 3), dtype=np.uint8)
     res = tmpl.match(canvas)
     assert not res.matched
@@ -43,6 +43,48 @@ def test_in_battle_marker_loads():
     """对局中标志模板可加载(用于动作前的状态确认)。"""
     tmpl = TEMPLATES["battle_emote"]
     assert tmpl.image.ndim == 3
+
+
+def test_all_templates_load_and_area_matches_image():
+    """所有登记模板(含每个变体)都能加载,且尺寸与 area 一致(防止再切图后忘改 area)。"""
+    for name, tmpl in TEMPLATES.items():
+        x1, y1, x2, y2 = tmpl.area
+        for i, img in enumerate(tmpl.images):
+            h, w = img.shape[:2]
+            assert (w, h) == (x2 - x1, y2 - y1), (
+                f"{name} 变体#{i}: 图 {w}x{h} 与 area {x2-x1}x{y2-y1} 不符"
+            )
+
+
+def test_all_templates_self_match():
+    """每个模板的**每个变体**放回其 area 原位都应高分命中。"""
+    for name, tmpl in TEMPLATES.items():
+        x1, y1, x2, y2 = tmpl.area
+        for i, img in enumerate(tmpl.images):
+            canvas = np.zeros((REF_HEIGHT, REF_WIDTH, 3), dtype=np.uint8)
+            canvas[y1:y2, x1:x2] = img
+            res = tmpl.match(canvas)
+            assert res.matched and res.score > 0.95, f"{name} 变体#{i}: score={res.score:.3f}"
+
+
+def test_multi_variant_matches_any():
+    """多变体模板:画面里出现任一变体都应命中(以'对战'按钮的两种样式为例)。"""
+    tmpl = TEMPLATES["main_battle_button"]
+    assert len(tmpl.images) >= 2, "对战按钮应登记多种样式变体"
+    x1, y1, x2, y2 = tmpl.area
+    for i in range(len(tmpl.images)):
+        canvas = np.zeros((REF_HEIGHT, REF_WIDTH, 3), dtype=np.uint8)
+        canvas[y1:y2, x1:x2] = tmpl.images[i]
+        assert tmpl.match(canvas).matched, f"变体#{i} 未命中"
+
+
+def test_scenes_reference_known_templates():
+    """场景标志引用的模板都已登记。"""
+    from crplayer.scene.registry import SCENES
+
+    for scene in SCENES.values():
+        for marker in scene.markers:
+            assert marker in TEMPLATES, f"{scene.name} 引用未登记模板 {marker}"
 
 
 def test_insert_swipe_path():

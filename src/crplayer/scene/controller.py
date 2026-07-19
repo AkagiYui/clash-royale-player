@@ -26,20 +26,28 @@ from crplayer.scene.template import (
 
 
 class SceneController:
-    def __init__(self, serial: str | None = None, backend: str = "scrcpy"):
+    def __init__(
+        self,
+        serial: str | None = None,
+        backend: str = "scrcpy",
+        touch_backend: str = "adb",
+    ):
         self.serial = serial
         self.backend = backend
+        # 触控后端:默认 adb —— 本机(Android 16 国服)上 MaaTouch 注入不派发到游戏窗口,
+        # 唯 adb input(带正确 displayId)稳定生效。详见 control/adb_input.py。
+        self.touch_backend = touch_backend
         self._cap = None
         self._touch = None
 
     # —— 资源 ——
     def open(self) -> None:
         from crplayer.capture import open_capture
-        from crplayer.control import MaaTouchController
+        from crplayer.control import open_touch
 
         self._cap = open_capture(self.backend, serial=self.serial)
         self._cap.open()
-        self._touch = MaaTouchController(serial=self.serial)
+        self._touch = open_touch(self.touch_backend, serial=self.serial)
         self._touch.open()
 
     def close(self) -> None:

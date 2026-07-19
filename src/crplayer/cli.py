@@ -191,12 +191,13 @@ def uistate(
 def scene(
     serial: str = typer.Option(None, "--serial", help="设备 serial"),
     backend: str = typer.Option("scrcpy", "--backend", help="采集后端"),
+    touch: str = typer.Option("adb", "--touch", help="触控后端: adb / maatouch / scrcpy"),
     goto: str = typer.Option(None, "--goto", help="导航到目标场景(如 in_battle)"),
 ) -> None:
     """场景调度:识别当前场景(传统 CV),或用 --goto 沿导航图跳转。"""
     from crplayer.scene import SceneController
 
-    with SceneController(serial=serial, backend=backend) as sc:
+    with SceneController(serial=serial, backend=backend, touch_backend=touch) as sc:
         cur = sc.current_scene()
         typer.echo(f"当前场景: {cur}")
         if goto:
@@ -209,13 +210,14 @@ def tap(
     x: int = typer.Argument(..., help="设备像素 X"),
     y: int = typer.Argument(..., help="设备像素 Y"),
     serial: str = typer.Option(None, "--serial", help="设备 serial"),
+    touch: str = typer.Option("adb", "--touch", help="触控后端: adb / maatouch / scrcpy"),
 ) -> None:
-    """用 MaaTouch 在设备像素坐标点击(测试触控注入)。"""
-    from crplayer.control import MaaTouchController
+    """在设备像素坐标点击(测试触控注入)。默认 adb(本机唯一稳定派发到游戏窗口的路径)。"""
+    from crplayer.control import open_touch
 
-    with MaaTouchController(serial=serial) as c:
+    with open_touch(touch, serial=serial) as c:
         c.tap(x, y)
-    typer.echo(f"已点击 ({x}, {y})")
+    typer.echo(f"已点击 ({x}, {y}) via {touch}")
 
 
 @app.command()
@@ -226,13 +228,14 @@ def swipe(
     y2: int = typer.Argument(...),
     duration: int = typer.Option(300, "--duration", help="拖拽时长 ms"),
     serial: str = typer.Option(None, "--serial", help="设备 serial"),
+    touch: str = typer.Option("adb", "--touch", help="触控后端: adb / maatouch / scrcpy"),
 ) -> None:
-    """用 MaaTouch 拖拽(测试)。"""
-    from crplayer.control import MaaTouchController
+    """拖拽(测试)。默认 adb。"""
+    from crplayer.control import open_touch
 
-    with MaaTouchController(serial=serial) as c:
+    with open_touch(touch, serial=serial) as c:
         c.swipe(x1, y1, x2, y2, duration_ms=duration)
-    typer.echo(f"已拖拽 ({x1},{y1}) -> ({x2},{y2})")
+    typer.echo(f"已拖拽 ({x1},{y1}) -> ({x2},{y2}) via {touch}")
 
 
 if __name__ == "__main__":

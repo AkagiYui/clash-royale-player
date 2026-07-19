@@ -66,10 +66,36 @@ uv run crplayer capture --backend scrcpy -o shot.png
 # UI 状态(前台包 / 是否在游戏 / 弹窗),检测游戏退出或弹窗
 uv run crplayer uistate
 
-# MaaTouch 触控注入(设备像素坐标)
+# 触控注入(设备像素坐标)。默认后端 adb —— 本机(Android 16 国服)唯一稳定派发到
+# 游戏窗口的注入路径;MaaTouch 注入不派发到游戏窗口(见 control/adb_input.py 说明)。
 uv run crplayer tap 1200 1700
 uv run crplayer swipe 1200 2400 1200 1600 --duration 300
+uv run crplayer tap 1200 1700 --touch maatouch   # 显式换后端(adb / maatouch / scrcpy)
+
+# 场景识别(传统 CV,不用大模型):main_menu / matchmaking / in_battle / battle_end
+uv run crplayer scene                       # 打印当前场景
+uv run crplayer scene --goto matchmaking    # 主菜单点"对战"进入匹配
 ```
+
+## 触控后端
+
+`control/` 有三条独立注入通道,经 `open_touch(backend)` 选择,默认 **adb**:
+
+| 后端 | 机制 | 本机(OPPO / Android 16) |
+|------|------|--------------------------|
+| `adb` | `adb shell input`(InputManager,带正确 displayId) | ✅ 稳定 |
+| `maatouch` | 常驻 app_process,反射 injectInputEvent | ❌ 事件不派发到游戏窗口(见下) |
+| `scrcpy` | scrcpy 控制 socket(注入前 setDisplayId) | ❌ 当前实现未注入(P:0/1),待调试 |
+
+> **MaaTouch 不通根因(已对照官方源码求证,与反外挂无关、别的设备没有):**
+> MaaTouch 的 `Controller.java` 构造 MotionEvent 时**从不调用 `setDisplayId`**,又用
+> `INJECT_MODE_ASYNC` 静默注入;Android 12+ 的 InputDispatcher 会丢弃无有效目标显示的
+> 注入事件(logcat `no touched window on display`),但指针叠层仍能看到 → "叠层有、
+> 游戏无反应"。scrcpy 早已用反射 `InputEvent.setDisplayId(displayId)` 解决同类问题
+> ([scrcpy#3186](https://github.com/Genymobile/scrcpy/issues/3186)),MaaTouch 至今未跟进;
+> MAA 主项目对多显示器仅在 screencap 层用 `-d` 指定,与注入无关。`adb`/`scrcpy` 后端都带
+> 有效 displayId 故可用。evdev 直写因 SELinux 不可用(需 root)。详见
+> `src/crplayer/control/adb_input.py` 顶部说明。
 
 ## 感知层输出(GameState)
 
