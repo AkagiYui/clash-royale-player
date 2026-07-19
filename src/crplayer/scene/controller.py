@@ -94,6 +94,62 @@ class SceneController:
         logger.warning(f"等待场景 {name} 超时")
         return False
 
+    # —— 状态确认(参考 SRC:动作前先确认所在场景)——
+    def is_scene(self, name: str, ref_frame=None) -> bool:
+        return self.current_scene(ref_frame=ref_frame) == name
+
+    def is_in_battle(self, ref_frame=None) -> bool:
+        """当前是否在对局中(左下角表情气泡常驻)。对局内任何操作前都应先过这一关。"""
+        ref = ref_frame if ref_frame is not None else self.grab_ref()
+        from crplayer.scene.registry import TEMPLATES
+
+        return TEMPLATES["battle_emote"].match(ref).matched
+
+    def assert_in_battle(self, ref_frame=None) -> None:
+        """不在对局中就抛错,阻止把牌点到结算/菜单上(这次踩的坑)。"""
+        if not self.is_in_battle(ref_frame=ref_frame):
+            raise RuntimeError("当前不在对局中,拒绝执行对局内操作")
+
+    def wait_until(self, template_name: str, timeout: float = 30.0, interval: float = 0.3) -> bool:
+        """轮询直到某模板出现(SRC 的 wait_until_appear)。"""
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            if self.appear(template_name).matched:
+                return True
+            time.sleep(interval)
+        return False
+
+    def appear_then_click(self, template_name: str, ref_frame=None) -> bool:
+        """出现才点(SRC 的 appear_then_click):等价于带存在性检查的 click。"""
+        return self.click(template_name, ref_frame=ref_frame)
+
+    # —— 对局内操作(务必先确认在对局中)——
+    # 手牌 4 槽在参考画布(904x1280)的中心坐标,接入新设备/分辨率需校准。
+    HAND_SLOTS_REF = [(287, 1139), (420, 1139), (550, 1139), (679, 1139)]
+
+    def deploy_card(self, slot: int, target_ref: tuple[int, int], use_drag: bool = False) -> bool:
+        """放牌:先确认在对局中,再"选牌槽 -> 落点"。target_ref 为参考画布坐标。
+
+        这是这次教训的修复点——不确认状态就放牌,会把牌点到结算/菜单上。
+        """
+        ref = self.grab_ref()
+        if not self.is_in_battle(ref_frame=ref):
+            logger.warning("deploy_card 被拒:当前不在对局中")
+            return False
+        if not (0 <= slot < len(self.HAND_SLOTS_REF)):
+            raise ValueError(f"手牌槽越界: {slot}")
+
+        sx, sy = self._ref_to_device(*self.HAND_SLOTS_REF[slot])
+        tx, ty = self._ref_to_device(*target_ref)
+        if use_drag:
+            self._touch.drag(sx, sy, tx, ty)
+        else:
+            self._touch.tap(sx, sy)
+            time.sleep(0.15)
+            self._touch.tap(tx, ty)
+        logger.info(f"放牌: slot{slot} -> ref{target_ref}")
+        return True
+
     # —— 点击 ——
     def click(self, template_name: str, ref_frame=None) -> bool:
         """匹配到模板则点击其目标点(参考坐标换算到设备)。返回是否点击。"""

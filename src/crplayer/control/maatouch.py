@@ -32,12 +32,54 @@ import threading
 import time
 from pathlib import Path
 
+import numpy as np
 from loguru import logger
 
 _LOCAL_BINARY = Path(__file__).resolve().parents[3] / "bin" / "maatouch"
 _DEVICE_BINARY = "/data/local/tmp/maatouch"
 _MAIN_CLASS = "com.shxyke.MaaTouch.App"
 _PRESSURE = 255  # 必须为 255(设备端整数除法)
+
+
+def insert_swipe(p0, p3, speed: int = 15, min_distance: int = 10) -> list[list[int]]:
+    """在起点/终点之间插值出一条**三次贝塞尔曲线**路径(移植自 StarRailCopilot)。
+
+    随机控制点 + 非等速采样(两端密、中间疏),让拖拽轨迹接近真人,而非直线匀速。
+    speed:平均移动速度(像素/10ms)。
+    """
+    p0 = np.array(p0, dtype=float)
+    p3 = np.array(p3, dtype=float)
+    distance = float(np.linalg.norm(p3 - p0))
+
+    def _rnorm(a, b, n=5):
+        return float(np.mean(np.random.uniform(a, b, size=n)))
+
+    def _rtheta():
+        t = np.random.uniform(0, 2 * np.pi)
+        return np.array([np.sin(t), np.cos(t)])
+
+    p1 = 2 / 3 * p0 + 1 / 3 * p3 + _rtheta() * _rnorm(-distance * 0.1, distance * 0.1)
+    p2 = 1 / 3 * p0 + 2 / 3 * p3 + _rtheta() * _rnorm(-distance * 0.1, distance * 0.1)
+
+    segments = max(int(distance / speed) + 1, 5)
+    lower, upper = _rnorm(-85, -60), _rnorm(80, 90)
+    theta = np.arange(lower, upper + 1e-4, (upper - lower) / segments)
+    ts = np.sin(theta / 180 * np.pi)
+    ts = np.sign(ts) * np.abs(ts) ** 0.9
+    ts = (ts - ts.min()) / (ts.max() - ts.min())
+
+    points: list[list[int]] = []
+    prev = np.array([-100, -100])
+    for t in ts:
+        pt = p0 * (1 - t) ** 3 + 3 * p1 * t * (1 - t) ** 2 + 3 * p2 * t**2 * (1 - t) + p3 * t**3
+        pt = pt.astype(int)
+        if np.linalg.norm(pt - prev) < min_distance:
+            continue
+        points.append(pt.tolist())
+        prev = pt
+    if not points:
+        points = [p0.astype(int).tolist(), p3.astype(int).tolist()]
+    return points
 
 
 class MaaTouchController:
@@ -196,20 +238,28 @@ class MaaTouchController:
     def swipe(
         self,
         x1: int, y1: int, x2: int, y2: int,
-        duration_ms: int = 300, steps: int = 16, contact: int = 0,
+        duration_ms: int = 300, contact: int = 0, settle: bool = False,
     ) -> None:
-        """从 (x1,y1) 拖到 (x2,y2)(逻辑坐标)。用设备端 w 事件控制节奏。"""
+        """从 (x1,y1) 拖到 (x2,y2)(逻辑坐标)。走 insert_swipe 贝塞尔轨迹 + 设备端 w 节奏,
+        整段一次性写入同一 payload(参考 SRC)。settle=True 时在终点多停两拍再抬起
+        ——用于皇室战争拖拽放牌,避免终点被当成滑动而非落点。"""
         x1, y1 = self._prep(x1, y1)
         x2, y2 = self._prep(x2, y2)
-        steps = max(steps, 1)
-        step_ms = max(duration_ms // steps, 1)
-        self._write(f"d {contact} {x1} {y1} {_PRESSURE}", "c")
-        for i in range(1, steps + 1):
-            t = i / steps
-            xi = int(x1 + (x2 - x1) * t)
-            yi = int(y1 + (y2 - y1) * t)
-            self._write(f"m {contact} {xi} {yi} {_PRESSURE}", f"w {step_ms}", "c")
-        self._write(f"u {contact}", "c")
+        points = insert_swipe((x1, y1), (x2, y2))
+        step_ms = max(duration_ms // len(points), 1)
+
+        cmds = [f"d {contact} {points[0][0]} {points[0][1]} {_PRESSURE}", "c"]
+        for px, py in points[1:]:
+            cmds += [f"m {contact} {px} {py} {_PRESSURE}", f"w {step_ms}", "c"]
+        if settle:
+            cmds += [f"m {contact} {x2} {y2} {_PRESSURE}", "w 140", "c",
+                     f"m {contact} {x2} {y2} {_PRESSURE}", "w 140", "c"]
+        cmds += [f"u {contact}", "c"]
+        self._write(*cmds)
+
+    def drag(self, x1: int, y1: int, x2: int, y2: int, duration_ms: int = 400) -> None:
+        """带终点停顿的拖拽(放牌用)。"""
+        self.swipe(x1, y1, x2, y2, duration_ms=duration_ms, settle=True)
 
     # —— 归一化坐标 API(0~1),按 header 分辨率换算 ——
     def tap_norm(self, nx: float, ny: float, **kw) -> None:

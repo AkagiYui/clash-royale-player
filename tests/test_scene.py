@@ -37,3 +37,18 @@ def test_no_false_match_on_blank():
     canvas = np.zeros((REF_HEIGHT, REF_WIDTH, 3), dtype=np.uint8)
     res = tmpl.match(canvas)
     assert not res.matched
+
+
+def test_in_battle_marker_loads():
+    """对局中标志模板可加载(用于动作前的状态确认)。"""
+    tmpl = TEMPLATES["battle_emote"]
+    assert tmpl.image.ndim == 3
+
+
+def test_insert_swipe_path():
+    """贝塞尔滑动路径:起终点正确、点数足够。"""
+    from crplayer.control.maatouch import insert_swipe
+
+    pts = insert_swipe((300, 1150), (700, 600))
+    assert len(pts) >= 5
+    assert pts[0] == [300, 1150] and pts[-1] == [700, 600]
