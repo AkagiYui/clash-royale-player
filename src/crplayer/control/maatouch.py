@@ -171,14 +171,16 @@ class MaaTouchController:
                 self._reconnect()
 
     def _prep(self, x: int, y: int) -> tuple[int, int]:
-        """输入逻辑显示坐标 -> 裁剪到屏内 -> 转换为注入用的自然方向坐标。"""
+        """裁剪到屏内。MaaTouch 走 InputManager.injectInputEvent(MotionEvent),坐标是
+        **逻辑显示坐标**(与截图/adb input 同坐标系,系统已处理旋转),故**不做**方向翻转。
+        (evdev 直写才需要自然方向坐标,见 _to_native,MaaTouch 不用。)"""
         cx = min(max(int(x), 0), self.max_x - 1) if self.max_x else int(x)
         cy = min(max(int(y), 0), self.max_y - 1) if self.max_y else int(y)
-        return self._to_native(cx, cy)
+        return cx, cy
 
     # —— 设备像素坐标 API(传入逻辑显示坐标,与截图坐标系一致)——
     def tap(self, x: int, y: int, hold_ms: int = 0, contact: int = 0) -> None:
-        """在设备像素 (x,y) 点击(逻辑坐标,自动做旋转校正)。
+        """在设备像素 (x,y) 点击(逻辑显示坐标,与截图一致)。
 
         关键:down/commit/up/commit 必须**一次性**写入同一 payload(参考 SRC)。
         若在 down 与 up 之间用 Python sleep 分成两次写,触点会保持按下,下一次 down
