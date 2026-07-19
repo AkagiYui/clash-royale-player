@@ -1,30 +1,21 @@
-"""adb input 触控注入(经 InputManager,带正确 displayId,本机 Android 16 实测可用)。
+"""adb input 触控注入(经 InputManager,带正确 displayId)。当前默认触控后端。
 
-为什么需要它(MaaTouch 不通根因,已对照官方源码求证):
-    本机(OPPO OPD2413,Android 16 / SDK 36)上,MaaTouch 的注入**能被输入监视层看到**
-    (开发者选项"指针位置"叠层显示 P:1/1、坐标、压力都对),但**不会被派发到游戏窗口**
-    —— 点"对战""确定"等按钮毫无反应。对同一坐标改用 `adb shell input tap` 则正常触发
-    (能开始匹配、能关对话框)。此问题**与设备/系统版本有关,与反外挂无关**,别的设备没有。
+选型说明(2026-07-19 三后端×两设备实测):
+    adb input 在 69dbcd7c(OPD2413/Android16)与 8ddbcbe5(PKR110/Android15)上均稳定可用
+    ——`adb shell input -d <display>` 带有效 displayId,可靠派发到游戏窗口(点"对战"开局、
+    点"确定"关结算)。作为默认后端主要图其**简单稳定、零额外部署**(不依赖推 maatouch 二进制、
+    不依赖 scrcpy-server)。
 
-    根因在 MotionEvent 的 **displayId**。查 MaaTouch 官方源码 Controller.java:
-        MotionEvent.obtain(..., DEFAULT_DEVICE_ID, 0, SOURCE_TOUCHSCREEN, 0);
-        injectEvent(event, InputManager.INJECT_MODE_ASYNC);
-    它**从不调用 setDisplayId**,事件 displayId 为 INVALID_DISPLAY(-1);又用 ASYNC 模式
-    (不等结果),失败时**静默无报错**。Android 12+ 的 InputDispatcher 会把无有效目标显示的
-    注入事件丢弃(logcat 典型 "no touched window on display"),但仍会被输入监视器(指针叠层)
-    看到 —— 恰好解释"叠层有、游戏无反应"。`adb shell input` 会带上有效 displayId,故能派发。
-
-    官方 MaaTouch(截至 master)并未修复此问题;scrcpy 早已解决(见其 issue #3186):注入前用
-    反射 `InputEvent.setDisplayId(displayId)` 把事件绑定目标显示——MaaTouch 缺的正是这一步。
-    MAA 主项目对多显示器的处理(issue #12175)只在 screencap 层(-d 指定显示),与注入无关。
-    MaaTouch 是编译好的 dex 无法从外部补 displayId,故本机改用本后端。scrcpy 控制通道设计上
-    带 displayId(理应可用),但本仓当前实现实测未注入(P:0/1),待调试——见 scrcpy_control.py。
+    历史更正:早先曾认为 MaaTouch 在 69dbcd7c 上"注入不派发到游戏窗口、根因缺 setDisplayId",
+    并以此作为改用本后端的理由——**该诊断已证伪**。MaaTouch 现两台都能正常点"对战"(见
+    control/maatouch.py 顶部),早期"点不动"实为其坐标/旋转换算 bug(已修)+ 当时肉眼估坐标
+    估歪。故 adb 与 maatouch 均可用;scrcpy 控制通道两台都不通、待调试(见 scrcpy_control.py)。
 
 接口与 MaaTouchController 对齐(tap/swipe/drag/tap_norm/swipe_norm/open/close),
 供 SceneController 直接替换。坐标为**逻辑显示坐标**(与截图/adb 同坐标系)。
 
 代价:每次动作 spawn 一次 `adb shell input`(约几十毫秒),不如 MaaTouch 常驻管道低延迟;
-但菜单导航与皇室战争的低频决策足够用。需要更低延迟时可换 scrcpy 控制通道。
+但菜单导航与皇室战争的低频决策足够用。需要更低延迟时可换 MaaTouch(常驻管道,已实测可用)。
 """
 
 from __future__ import annotations

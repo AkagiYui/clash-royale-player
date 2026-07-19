@@ -5,18 +5,17 @@
 (InputManager 反射) / adb input 的第三条注入路径。
 
 设计上的优点:scrcpy-server 注入前会用反射 `InputEvent.setDisplayId(displayId)` 把事件绑定
-到目标显示——这正是 MaaTouch 所缺失、导致其在本机不派发到游戏窗口的那一步(详见
-control/adb_input.py)。故理论上这条通道能派发到游戏窗口,且常驻 socket、支持多点、延迟低。
+到目标显示,常驻 socket、支持多点、延迟低。理论上是三条注入路径里最理想的。
 
-⚠️ 本机(OPPO OPD2413 / Android 16)实测(2026-07,scrcpy 3.3.4,server 版本一致):
-**本模块当前实现注入无效**——发 INJECT_TOUCH 后,开发者"指针位置"叠层仍为 P:0/1、Prs:0.0,
-即触点**根本没注册进输入系统**(对比 MaaTouch 至少能到 P:1/1)。这说明是本模块的控制协议/
-握手实现与 scrcpy 3.x 对不上(而非 displayId 派发问题),用前需先调试。默认后端请用 adb。
+⚠️ 但本模块当前实现不可用(2026-07-19 实测,两台设备均失败:OPD2413/Android16 与
+PKR110/Android15,scrcpy 3.3.4):**发 INJECT_TOUCH 后画面无任何反应,触点根本没注册进
+输入系统**(对比 adb/MaaTouch 都能正常点"对战"开局)。这是本模块的控制协议/握手实现与
+scrcpy 3.x 对不上,与设备无关、也非 displayId 问题,用前需先调试。默认后端请用 adb;
+MaaTouch 亦已实测可用(见 control/maatouch.py)。
 
-⚠️ 历史备注更正:早期注释曾断言"国服开战被输入层拦截、换注入方式都不行"。该结论已证伪,
-与反外挂无关——adb input 实测可正常点"对战"开战、可点结算/对话框;当时的"点不动"部分是
-**坐标量错**(把按钮下方约 245px 的背景当成按钮)。MaaTouch 不通的真正原因是注入事件缺
-displayId(见 adb_input.py 顶部),换到带 displayId 的 adb input 即可。
+历史更正:早期注释曾断言"国服开战被输入层拦截、换注入方式都不行""MaaTouch 缺 displayId
+不派发"——**均已证伪**。adb 与 MaaTouch 两台都能正常点"对战"开战、点结算/对话框;当时的
+"点不动"是坐标量错(把按钮下方约 245px 背景当按钮)+ MaaTouch 早期坐标/旋转 bug(已修)。
 
 坐标:传入逻辑显示坐标(与截图一致),消息里带上屏幕宽高,server 端负责映射。
 """

@@ -21,20 +21,24 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-# 参考画布:等于本设备 scrcpy 输出(2400x3392 -> max_size1280 -> 904x1280),宽高比正确。
-# 换设备时只需保证 to_reference 把帧缩放到同一尺寸即可复用模板。
+# 默认参考画布(平板 profile):等于其 scrcpy 输出(2400x3392 -> max_size1280 -> 904x1280)。
+# 多设备:每个设备有自己的 profile(见 scene/registry.py 的 SceneProfile),各自的参考画布
+# 与模板集。手机与平板宽高比差异大(0.45 vs 0.71),**不能**共用一张画布强行 resize——会
+# 变形导致模板匹配失效。故 to_reference / Template 均可按 profile 指定 ref 尺寸与素材目录。
 REF_WIDTH = 904
 REF_HEIGHT = 1280
 
 _ASSETS_DIR = Path(__file__).resolve().parents[3] / "assets" / "scenes"
 
 
-def to_reference(frame_bgr: np.ndarray) -> np.ndarray:
-    """把任意分辨率帧缩放到参考画布(BGR)。"""
+def to_reference(
+    frame_bgr: np.ndarray, ref_w: int = REF_WIDTH, ref_h: int = REF_HEIGHT
+) -> np.ndarray:
+    """把任意分辨率帧缩放到参考画布(BGR)。ref_w/ref_h 由调用方(profile)指定。"""
     h, w = frame_bgr.shape[:2]
-    if (w, h) == (REF_WIDTH, REF_HEIGHT):
+    if (w, h) == (ref_w, ref_h):
         return frame_bgr
-    return cv2.resize(frame_bgr, (REF_WIDTH, REF_HEIGHT), interpolation=cv2.INTER_AREA)
+    return cv2.resize(frame_bgr, (ref_w, ref_h), interpolation=cv2.INTER_AREA)
 
 
 @dataclass
@@ -58,10 +62,14 @@ class Template:
     color: tuple[int, int, int] | None = None   # 可选:期望平均色(BGR),叠加校验
     similarity: float = 0.85
     search_pad: int = 24
+    # 多设备:该模板所属 profile 的参考画布尺寸与素材目录。None 时回退到模块默认(平板)。
+    ref_size: tuple[int, int] | None = None      # (ref_w, ref_h)
+    assets_dir: Path | None = None
 
     _imgs: list[np.ndarray] | None = field(default=None, repr=False, compare=False)
 
     def __post_init__(self):
+        ref_w, ref_h = self.ref_size or (REF_WIDTH, REF_HEIGHT)
         if self.click is None:
             x1, y1, x2, y2 = self.area
             self.click = ((x1 + x2) // 2, (y1 + y2) // 2)
@@ -70,7 +78,7 @@ class Template:
             p = self.search_pad
             self.search = (
                 max(x1 - p, 0), max(y1 - p, 0),
-                min(x2 + p, REF_WIDTH), min(y2 + p, REF_HEIGHT),
+                min(x2 + p, ref_w), min(y2 + p, ref_h),
             )
 
     @property
@@ -82,9 +90,10 @@ class Template:
     def images(self) -> list[np.ndarray]:
         """所有变体图(懒加载 + 缓存)。"""
         if self._imgs is None:
+            base = self.assets_dir or _ASSETS_DIR
             imgs = []
             for fn in self.files:
-                path = _ASSETS_DIR / fn
+                path = base / fn
                 img = cv2.imread(str(path), cv2.IMREAD_COLOR)
                 if img is None:
                     raise FileNotFoundError(f"模板图不存在: {path}")

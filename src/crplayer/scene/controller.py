@@ -16,10 +16,8 @@ from collections import deque
 
 from loguru import logger
 
-from crplayer.scene.registry import EDGES, SCENES, TEMPLATES
+from crplayer.scene.registry import DEFAULT_PROFILE, SceneProfile, select_profile
 from crplayer.scene.template import (
-    REF_HEIGHT,
-    REF_WIDTH,
     MatchResult,
     to_reference,
 )
@@ -34,11 +32,13 @@ class SceneController:
     ):
         self.serial = serial
         self.backend = backend
-        # 触控后端:默认 adb —— 本机(Android 16 国服)上 MaaTouch 注入不派发到游戏窗口,
-        # 唯 adb input(带正确 displayId)稳定生效。详见 control/adb_input.py。
+        # 触控后端:默认 adb —— 简单稳定零部署,两台设备实测均可用;MaaTouch 亦已实测可用
+        # (低延迟候选),scrcpy 控制通道当前不通。详见 control/adb_input.py / maatouch.py。
         self.touch_backend = touch_backend
         self._cap = None
         self._touch = None
+        # CV profile:据设备 native 分辨率选择(参考画布 + 模板集)。open() 时绑定。
+        self._profile: SceneProfile = DEFAULT_PROFILE
 
     # —— 资源 ——
     def open(self) -> None:
@@ -49,6 +49,15 @@ class SceneController:
         self._cap.open()
         self._touch = open_touch(self.touch_backend, serial=self.serial)
         self._touch.open()
+        # 触控后端 open() 后 max_x/max_y 即设备 native 分辨率,据此挑 CV profile。
+        w, h = int(getattr(self._touch, "max_x", 0)), int(getattr(self._touch, "max_y", 0))
+        if not (w and h):
+            w, h = int(getattr(self._touch, "width", 0)), int(getattr(self._touch, "height", 0))
+        self._profile = select_profile(w, h)
+        logger.info(
+            f"CV profile: {self._profile.name}(native {w}x{h}, "
+            f"ref {self._profile.ref_width}x{self._profile.ref_height})"
+        )
 
     def close(self) -> None:
         if self._cap:
@@ -67,26 +76,26 @@ class SceneController:
 
     # —— 采集 ——
     def grab_ref(self):
-        """抓一帧并归一化到参考画布。"""
+        """抓一帧并归一化到当前 profile 的参考画布。"""
         frame = self._cap.grab()
-        return to_reference(frame.image)
+        return to_reference(frame.image, self._profile.ref_width, self._profile.ref_height)
 
     # —— 坐标换算:参考画布像素 -> 设备像素 ——
     def _ref_to_device(self, x: int, y: int) -> tuple[int, int]:
-        dx = int(x * self._touch.max_x / REF_WIDTH)
-        dy = int(y * self._touch.max_y / REF_HEIGHT)
+        dx = int(x * self._touch.max_x / self._profile.ref_width)
+        dy = int(y * self._touch.max_y / self._profile.ref_height)
         return dx, dy
 
     # —— 匹配 ——
     def appear(self, template_name: str, ref_frame=None) -> MatchResult:
-        tmpl = TEMPLATES[template_name]
+        tmpl = self._profile.templates[template_name]
         ref = ref_frame if ref_frame is not None else self.grab_ref()
         return tmpl.match(ref)
 
     def current_scene(self, ref_frame=None) -> str | None:
         ref = ref_frame if ref_frame is not None else self.grab_ref()
-        for scene in SCENES.values():
-            results = [TEMPLATES[m].match(ref).matched for m in scene.markers]
+        for scene in self._profile.scenes.values():
+            results = [self._profile.templates[m].match(ref).matched for m in scene.markers]
             hit = all(results) if scene.require_all else any(results)
             if hit:
                 return scene.name
@@ -109,9 +118,7 @@ class SceneController:
     def is_in_battle(self, ref_frame=None) -> bool:
         """当前是否在对局中(左下角表情气泡常驻)。对局内任何操作前都应先过这一关。"""
         ref = ref_frame if ref_frame is not None else self.grab_ref()
-        from crplayer.scene.registry import TEMPLATES
-
-        return TEMPLATES["battle_emote"].match(ref).matched
+        return self._profile.templates["battle_emote"].match(ref).matched
 
     def assert_in_battle(self, ref_frame=None) -> None:
         """不在对局中就抛错,阻止把牌点到结算/菜单上(这次踩的坑)。"""
@@ -191,7 +198,7 @@ class SceneController:
         if start == target:
             return True
 
-        path = self._bfs(start, target)
+        path = self._bfs(start, target, self._profile.edges)
         if not path:
             logger.warning(f"找不到 {start} -> {target} 的路径")
             return False
@@ -199,7 +206,7 @@ class SceneController:
 
         for i in range(len(path) - 1):
             frm, to = path[i], path[i + 1]
-            btn = self._edge_button(frm, to)
+            btn = self._edge_button(frm, to, self._profile.edges)
             deadline = time.time() + timeout
             while time.time() < deadline:
                 if self.current_scene() == to:
@@ -212,9 +219,9 @@ class SceneController:
         return True
 
     @staticmethod
-    def _bfs(start: str, target: str) -> list[str] | None:
+    def _bfs(start: str, target: str, edges: list[tuple[str, str, str]]) -> list[str] | None:
         graph: dict[str, list[str]] = {}
-        for frm, _btn, to in EDGES:
+        for frm, _btn, to in edges:
             graph.setdefault(frm, []).append(to)
         q = deque([[start]])
         seen = {start}
@@ -229,8 +236,8 @@ class SceneController:
         return None
 
     @staticmethod
-    def _edge_button(frm: str, to: str) -> str:
-        for a, btn, b in EDGES:
+    def _edge_button(frm: str, to: str, edges: list[tuple[str, str, str]]) -> str:
+        for a, btn, b in edges:
             if a == frm and b == to:
                 return btn
         raise KeyError(f"无边 {frm}->{to}")

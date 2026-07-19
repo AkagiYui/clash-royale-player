@@ -1,14 +1,12 @@
 """MaaTouch 触控注入(常驻 socket,最贴近真实物理触控)。
 
-⚠️ 本机实测不可用(OPPO OPD2413 / Android 16),与设备/系统版本有关、别的设备没有:
-MaaTouch 注入的 MotionEvent 能被输入监视层看到(开发者"指针位置"叠层显示 P:1/1、坐标
-压力都对),但**不会派发到游戏窗口**——点按钮无反应。根因(已对照官方源码)是其
-Controller.java 构造事件时**从不调用 setDisplayId**、且用 INJECT_MODE_ASYNC 静默注入;
-Android 12+ 会丢弃无有效目标显示的注入事件(logcat "no touched window on display")。
-scrcpy 用 InputEvent.setDisplayId 解决了同类问题(其 issue #3186),MaaTouch 至今未跟进。
-MaaTouch 是编译好的 dex 无法从外部补 displayId,故改用 control/adb_input.py 的
-AdbInputController(默认后端)。此模块保留供其它设备使用。
-
+✅ 实测可用(2026-07-19,三后端×两设备):MaaTouch 在 69dbcd7c(OPD2413/Android16,带笔)
+与 8ddbcbe5(PKR110/Android15)上均能正常点"对战"开局。早先一度认为本机不可用、并归因于
+"注入事件缺 setDisplayId、Android 12+ 丢弃"——**该诊断已证伪**:真正原因是本模块早期的
+坐标/旋转换算 bug(点歪了),已由 commit 1f1aaca(去掉错误的旋转校正、直接用逻辑显示坐标)
+与 f395418 修复;修好后 MaaTouch 派发到游戏窗口正常。触控笔与注入无关(掌拒只作用于真实
+硬件触摸,不影响软件注入的 MotionEvent)。当前默认后端仍为 adb(control/adb_input.py),
+MaaTouch 已通且低延迟、可作候选。⚠️ scrcpy 控制通道(scrcpy_control.py)两台都不通、待调试。
 
 架构文档阶段零:MaaTouch 优于 adb input / scrcpy 控制通道——常驻进程免去 spawn 开销,
 多点触控原生支持。100% Java,通过 app_process 运行,不需按 CPU 架构匹配二进制。
